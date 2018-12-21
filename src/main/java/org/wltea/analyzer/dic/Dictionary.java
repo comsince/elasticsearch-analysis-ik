@@ -38,6 +38,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -161,6 +162,9 @@ public class Dictionary {
 					singleton.loadPrepDict();
 					singleton.loadStopWordDict();
 
+					//加载数据库词典
+					new Thread(new HotDictReloadThread()).start();
+
 					if(cfg.isEnableRemoteDict()){
 						// 建立监控线程
 						for (String location : singleton.getRemoteExtDictionarys()) {
@@ -178,6 +182,78 @@ public class Dictionary {
 		}
 		return singleton;
 	}
+
+
+	private static Properties prop = new Properties();
+	static {
+		try {
+			Class.forName("com.mysql.jdbc.Driver");
+		} catch (ClassNotFoundException e) {
+			logger.error("error", e);
+		}
+	}
+
+
+	/**
+	 * 从mysql加载热更新词典
+	 */
+	private void loadMySQLExtDict() {
+		Connection conn = null;
+		Statement stmt = null;
+		ResultSet rs = null;
+
+		try {
+			Path file = PathUtils.get(getDictRoot(), "jdbc-reload.properties");
+			prop.load(new FileInputStream(file.toFile()));
+
+			logger.info("[==========]jdbc-reload.properties");
+			for(Object key : prop.keySet()) {
+				logger.info("[==========]" + key + "=" + prop.getProperty(String.valueOf(key)));
+			}
+
+			logger.info("[==========]query hot dict from mysql, " + prop.getProperty("jdbc.reload.sql") + "......");
+
+			conn = DriverManager.getConnection(
+					prop.getProperty("jdbc.url"),
+					prop.getProperty("jdbc.user"),
+					prop.getProperty("jdbc.password"));
+			stmt = conn.createStatement();
+			rs = stmt.executeQuery(prop.getProperty("jdbc.reload.sql"));
+
+			while(rs.next()) {
+				String theWord = rs.getString("word");
+				logger.info("[==========]hot word from mysql: " + theWord);
+				_MainDict.fillSegment(theWord.trim().toCharArray());
+			}
+
+			Thread.sleep(Integer.valueOf(String.valueOf(prop.get("jdbc.reload.interval"))));
+		} catch (Exception e) {
+			logger.error("erorr", e);
+		} finally {
+			if(rs != null) {
+				try {
+					rs.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+			if(stmt != null) {
+				try {
+					stmt.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+			if(conn != null) {
+				try {
+					conn.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+		}
+	}
+
 
 	private List<String> walkFileTree(List<String> files, Path path) {
 		if (Files.isRegularFile(path)) {
@@ -400,6 +476,9 @@ public class Dictionary {
 		this.loadExtDict();
 		// 加载远程自定义词库
 		this.loadRemoteExtDict();
+		// 从mysql加载词典
+		this.loadMySQLExtDict();
+
 	}
 
 	/**
@@ -534,7 +613,72 @@ public class Dictionary {
 			}
 		}
 
+
+		loadMySQLStopwordDict();
+
 	}
+
+
+	/**
+	 * 从mysql加载停用词
+	 */
+	private void loadMySQLStopwordDict() {
+		Connection conn = null;
+		Statement stmt = null;
+		ResultSet rs = null;
+
+		try {
+			Path file = PathUtils.get(getDictRoot(), "jdbc-reload.properties");
+			prop.load(new FileInputStream(file.toFile()));
+
+			logger.info("[==========]jdbc-reload.properties");
+			for(Object key : prop.keySet()) {
+				logger.info("[==========]" + key + "=" + prop.getProperty(String.valueOf(key)));
+			}
+
+			logger.info("[==========]query hot stopword dict from mysql, " + prop.getProperty("jdbc.reload.stopword.sql") + "......");
+
+			conn = DriverManager.getConnection(
+					prop.getProperty("jdbc.url"),
+					prop.getProperty("jdbc.user"),
+					prop.getProperty("jdbc.password"));
+			stmt = conn.createStatement();
+			rs = stmt.executeQuery(prop.getProperty("jdbc.reload.stopword.sql"));
+
+			while(rs.next()) {
+				String theWord = rs.getString("word");
+				logger.info("[==========]hot stopword from mysql: " + theWord);
+				_StopWords.fillSegment(theWord.trim().toCharArray());
+			}
+
+			Thread.sleep(Integer.valueOf(String.valueOf(prop.get("jdbc.reload.interval"))));
+		} catch (Exception e) {
+			logger.error("erorr", e);
+		} finally {
+			if(rs != null) {
+				try {
+					rs.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+			if(stmt != null) {
+				try {
+					stmt.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+			if(conn != null) {
+				try {
+					conn.close();
+				} catch (SQLException e) {
+					logger.error("error", e);
+				}
+			}
+		}
+	}
+
 
 	/**
 	 * 加载量词词典
